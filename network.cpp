@@ -12,7 +12,7 @@ int raw_recv_fd=-1;
 int raw_send_fd=-1;
 u32_t link_level_header_len=0;//set it to 14 if SOCK_RAW is used in socket(PF_PACKET, SOCK_RAW, htons(ETH_P_IP));
 
-int seq_mode=2;
+int seq_mode=1;
 
 int filter_port=-1;
 
@@ -21,11 +21,14 @@ int disable_bpf_filter=0;  //for test only,most time no need to disable this
 u32_t bind_address_uint32=0;
 
 int lower_level=0;
+int lower_level_manual=0;
 int ifindex=-1;
 char if_name[100]="";
 
-unsigned char oppsite_hw_addr[6]=
-    {0xff,0xff,0xff,0xff,0xff,0xff};
+unsigned short g_ip_id_counter=0;
+
+unsigned char dest_hw_addr[sizeof(sockaddr_ll::sll_addr)]=
+    {0xff,0xff,0xff,0xff,0xff,0xff,0,0};
 //{0x00,0x23,0x45,0x67,0x89,0xb9};
 
 struct sock_filter code_tcp_old[] = {
@@ -44,8 +47,8 @@ struct sock_filter code_tcp_old[] = {
 		{ 0x6, 0, 0, 0x00000000 },//12
 };
 struct sock_filter code_tcp[] = {
-{ 0x5, 0, 0, 0x00000001 },//0    //jump to 2,dirty hack from tcpdump -d's output
-{ 0x5, 0, 0, 0x00000000 },//1
+//{ 0x5, 0, 0, 0x00000001 },//0    //jump to 2,dirty hack from tcpdump -d's output
+//{ 0x5, 0, 0, 0x00000000 },//1
 { 0x30, 0, 0, 0x00000009 },//2
 { 0x15, 0, 6, 0x00000006 },//3
 { 0x28, 0, 0, 0x00000006 },//4
@@ -56,11 +59,11 @@ struct sock_filter code_tcp[] = {
 { 0x6, 0, 0, 0x0000ffff },//9
 { 0x6, 0, 0, 0x00000000 },//10
 };
-int code_tcp_port_index=8;
+int code_tcp_port_index=6;
 
 struct sock_filter code_udp[] = {
-{ 0x5, 0, 0, 0x00000001 },
-{ 0x5, 0, 0, 0x00000000 },
+//{ 0x5, 0, 0, 0x00000001 },
+//{ 0x5, 0, 0, 0x00000000 },
 { 0x30, 0, 0, 0x00000009 },
 { 0x15, 0, 6, 0x00000011 },
 { 0x28, 0, 0, 0x00000006 },
@@ -71,10 +74,10 @@ struct sock_filter code_udp[] = {
 { 0x6, 0, 0, 0x0000ffff },
 { 0x6, 0, 0, 0x00000000 },
 };
-int code_udp_port_index=8;
+int code_udp_port_index=6;
 struct sock_filter code_icmp[] = {
-{ 0x5, 0, 0, 0x00000001 },
-{ 0x5, 0, 0, 0x00000000 },
+//{ 0x5, 0, 0, 0x00000001 },
+//{ 0x5, 0, 0, 0x00000000 },
 { 0x30, 0, 0, 0x00000009 },
 { 0x15, 0, 1, 0x00000001 },
 { 0x6, 0, 0, 0x0000ffff },
@@ -162,6 +165,7 @@ packet_info_t::packet_info_t()
 int init_raw_socket()
 {
 
+	g_ip_id_counter=get_true_random_number()%65535;
 	if(lower_level==0)
 	{
 		raw_send_fd = socket(AF_INET , SOCK_RAW , IPPROTO_TCP);
@@ -191,15 +195,26 @@ int init_raw_socket()
 	        //perror("Failed to create raw_send_fd");
 	        myexit(1);
 	    }
-		init_ifindex(if_name);
+		//init_ifindex(if_name);
 
 	}
 
-    if(setsockopt(raw_send_fd, SOL_SOCKET, SO_SNDBUFFORCE, &socket_buf_size, sizeof(socket_buf_size))<0)
-    {
-    	mylog(log_fatal,"SO_SNDBUFFORCE fail\n");
-    	myexit(1);
-    }
+	if(force_socket_buf)
+	{
+		if(setsockopt(raw_send_fd, SOL_SOCKET, SO_SNDBUFFORCE, &socket_buf_size, sizeof(socket_buf_size))<0)
+		{
+			mylog(log_fatal,"SO_SNDBUFFORCE fail  socket_buf_size=%d  errno=%s\n",socket_buf_size,strerror(errno));
+			myexit(1);
+		}
+	}
+	else
+	{
+		if(setsockopt(raw_send_fd, SOL_SOCKET, SO_SNDBUF, &socket_buf_size, sizeof(socket_buf_size))<0)
+		{
+			mylog(log_fatal,"SO_SNDBUF fail  socket_buf_size=%d  errno=%s\n",socket_buf_size,strerror(errno));
+			myexit(1);
+		}
+	}
 
 
 
@@ -213,11 +228,22 @@ int init_raw_socket()
         myexit(1);
     }
 
-    if(setsockopt(raw_recv_fd, SOL_SOCKET, SO_RCVBUFFORCE, &socket_buf_size, sizeof(socket_buf_size))<0)
-    {
-    	mylog(log_fatal,"SO_RCVBUFFORCE fail\n");
-    	myexit(1);
-    }
+	if(force_socket_buf)
+	{
+		if(setsockopt(raw_recv_fd, SOL_SOCKET, SO_RCVBUFFORCE, &socket_buf_size, sizeof(socket_buf_size))<0)
+		{
+			mylog(log_fatal,"SO_RCVBUFFORCE fail  socket_buf_size=%d  errno=%s\n",socket_buf_size,strerror(errno));
+			myexit(1);
+		}
+	}
+	else
+	{
+		if(setsockopt(raw_recv_fd, SOL_SOCKET, SO_RCVBUF, &socket_buf_size, sizeof(socket_buf_size))<0)
+		{
+			mylog(log_fatal,"SO_RCVBUF fail  socket_buf_size=%d  errno=%s\n",socket_buf_size,strerror(errno));
+			myexit(1);
+		}
+	}
 
     //IP_HDRINCL to tell the kernel that headers are included in the packet
 
@@ -285,7 +311,7 @@ void remove_filter()
 		//exit(-1);
 	}
 }
-int init_ifindex(char * if_name)
+int init_ifindex(const char * if_name,int &index)
 {
 	struct ifreq ifr;
 	size_t if_name_len=strlen(if_name);
@@ -301,8 +327,227 @@ int init_ifindex(char * if_name)
 		mylog(log_fatal,"SIOCGIFINDEX fail ,%s\n",strerror(errno));
 		myexit(-1);
 	}
-	ifindex=ifr.ifr_ifindex;
-	mylog(log_info,"ifname:%s  ifindex:%d\n",if_name,ifindex);
+	index=ifr.ifr_ifindex;
+	mylog(log_info,"ifname:%s  ifindex:%d\n",if_name,index);
+	return 0;
+}
+bool interface_has_arp(const char * interface) {
+    struct ifreq ifr;
+   // int sock = socket(PF_INET6, SOCK_DGRAM, IPPROTO_IP);
+    int sock=raw_send_fd;
+    memset(&ifr, 0, sizeof(ifr));
+    strcpy(ifr.ifr_name, interface);
+    if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+            //perror("SIOCGIFFLAGS");
+    		mylog(log_fatal,"ioctl(sock, SIOCGIFFLAGS, &ifr) failed for interface %s,errno %s\n",interface,strerror(errno));
+            myexit(-1);
+    }
+    //close(sock);
+    return !(ifr.ifr_flags & IFF_NOARP);
+}
+struct route_info_t
+{
+	string if_name;
+	u32_t dest;
+	u32_t mask;
+	u32_t gw;
+	u32_t flag;
+
+};
+int dest_idx=1;
+int gw_idx=2;
+int if_idx=0;
+int mask_idx=7;
+int flag_idx=3;
+vector<int> find_route_entry(const vector<route_info_t> &route_info_vec,u32_t ip)
+{
+	vector<int> res;
+	for(u32_t i=0;i<=32;i++)
+	{
+		u32_t mask=0xffffffff;
+		//mask >>=i;
+		//if(i==32) mask=0;  //why 0xffffffff>>32  equals 0xffffffff??
+
+		mask <<=i;
+		if(i==32) mask=0;
+		log_bare(log_debug,"(mask:%x)",mask);
+		for(u32_t j=0;j<route_info_vec.size();j++)
+		{
+			const route_info_t & info=route_info_vec[j];
+			if(info.mask!=mask)
+				continue;
+			log_bare(log_debug,"<<%d,%d>>",i,j);
+			if((info.dest&mask)==(ip&mask))
+			{
+				log_bare(log_debug,"found!");
+				res.push_back(j);
+			}
+		}
+		if(res.size()!=0)
+		{
+			return res;
+		}
+	}
+	return res;
+}
+int find_direct_dest(const vector<route_info_t> &route_info_vec,u32_t ip,u32_t &dest_ip,string &if_name)
+{
+	vector<int> res;
+	for(int i=0;i<1000;i++)
+	{
+		res=find_route_entry(route_info_vec,ip);
+		log_bare(log_debug,"<entry:%u>",(u32_t)res.size());
+		if(res.size()==0)
+		{
+			mylog(log_error,"cant find route entry\n");
+			return -1;
+		}
+		if(res.size()>1)
+		{
+			mylog(log_error,"found duplicated entries\n");
+			return -1;
+		}
+		if((route_info_vec[res[0]].flag&2)==0)
+		{
+			dest_ip=ip;
+			if_name=route_info_vec[res[0]].if_name;
+			return 0;
+		}
+		else
+		{
+			ip=route_info_vec[res[0]].gw;
+		}
+	}
+	mylog(log_error,"dead loop in find_direct_dest\n");
+	return -1;
+}
+struct arp_info_t
+{
+	u32_t ip;
+	string hw;
+	string if_name;
+};
+int arp_ip_idx=0;
+int arp_hw_idx=3;
+int arp_if_idx=5;
+
+
+int find_arp(const vector<arp_info_t> &arp_info_vec,u32_t ip,string if_name,string &hw)
+{
+	int pos=-1;
+	int count=0;
+	for(u32_t i=0;i<arp_info_vec.size();i++)
+	{
+		const arp_info_t & info=arp_info_vec[i];
+		if(info.if_name!=if_name) continue;
+		if(info.ip==ip)
+		{
+			count++;
+			pos=i;
+		}
+	}
+	if(count==0)
+	{
+		//mylog(log_warn,"cant find arp entry for %s %s,using 00:00:00:00:00:00\n",my_ntoa(ip),if_name.c_str());
+		//hw="00:00:00:00:00:00";
+		mylog(log_error,"cant find arp entry for %s %s\n",my_ntoa(ip),if_name.c_str());
+		return -1;
+	}
+	if(count>1)
+	{
+		mylog(log_error,"find multiple arp entry for %s %s\n",my_ntoa(ip),if_name.c_str());
+		return -1;
+	}
+	hw=arp_info_vec[pos].hw;
+	return 0;
+}
+int find_lower_level_info(u32_t ip,u32_t &dest_ip,string &if_name,string &hw)
+{
+	ip=htonl(ip);
+	if(ip==htonl(inet_addr("127.0.0.1")))
+	{
+		dest_ip=ntohl(ip);
+		if_name="lo";
+		hw="00:00:00:00:00:00";
+		return 0;
+	}
+
+	string route_file;
+	if(read_file("/proc/net/route",route_file)!=0) return -1;
+	string arp_file;
+	if(read_file("/proc/net/arp",arp_file)!=0) return -1;
+
+	log_bare(log_debug,"/proc/net/route:<<%s>>\n",route_file.c_str());
+	log_bare(log_debug,"/proc/net/arp:<<%s>>\n",route_file.c_str());
+
+	auto route_vec2=string_to_vec2(route_file.c_str());
+	vector<route_info_t> route_info_vec;
+	for(u32_t i=1;i<route_vec2.size();i++)
+	{
+		log_bare(log_debug,"<size:%u>",(u32_t)route_vec2[i].size());
+		if(route_vec2[i].size()!=11)
+		{
+			mylog(log_error,"route coloum %d !=11 \n",int(route_vec2[i].size()));
+			return -1;
+		}
+		route_info_t tmp;
+		tmp.if_name=route_vec2[i][if_idx];
+		if(hex_to_u32_with_endian(route_vec2[i][dest_idx],tmp.dest)!=0) return -1;
+		if(hex_to_u32_with_endian(route_vec2[i][gw_idx],tmp.gw)!=0) return -1;
+		if(hex_to_u32_with_endian(route_vec2[i][mask_idx],tmp.mask)!=0) return -1;
+		if(hex_to_u32(route_vec2[i][flag_idx],tmp.flag)!=0)return -1;
+		route_info_vec.push_back(tmp);
+		for(u32_t j=0;j<route_vec2[i].size();j++)
+		{
+			log_bare(log_debug,"<%s>",route_vec2[i][j].c_str());
+		}
+		log_bare(log_debug,"%s dest:%x mask:%x gw:%x flag:%x",tmp.if_name.c_str(),tmp.dest,tmp.mask,tmp.gw,tmp.flag);
+		log_bare(log_debug,"\n");
+	}
+
+	if(find_direct_dest(route_info_vec,ip,dest_ip,if_name)!=0)
+	{
+		mylog(log_error,"find_direct_dest failed for ip %s\n",my_ntoa(ntohl(ip)));
+		return -1;
+	}
+
+
+	log_bare(log_debug,"========\n");
+	auto arp_vec2=string_to_vec2(arp_file.c_str());
+	vector<arp_info_t> arp_info_vec;
+	for(u32_t i=1;i<arp_vec2.size();i++)
+	{
+		log_bare(log_debug,"<<arp_vec2[i].size(): %d>>",(int)arp_vec2[i].size());
+
+		for(u32_t j=0;j<arp_vec2[i].size();j++)
+		{
+			log_bare(log_debug,"<%s>",arp_vec2[i][j].c_str());
+		}
+		if(arp_vec2[i].size()!=6)
+		{
+			mylog(log_error,"arp coloum %d !=11 \n",int(arp_vec2[i].size()));
+			return -1;
+		}
+		arp_info_t tmp;
+		tmp.if_name=arp_vec2[i][arp_if_idx];
+		tmp.hw=arp_vec2[i][arp_hw_idx];
+		tmp.ip=htonl(inet_addr(arp_vec2[i][arp_ip_idx].c_str()));
+		arp_info_vec.push_back(tmp);
+		log_bare(log_debug,"\n");
+	}
+	if(!interface_has_arp(if_name.c_str()))
+	{
+		mylog(log_info,"%s is a noarp interface,using 00:00:00:00:00:00\n",if_name.c_str());
+		hw="00:00:00:00:00:00";
+	}
+	else if(find_arp(arp_info_vec,dest_ip,if_name,hw)!=0)
+	{
+		mylog(log_error,"find_arp failed for dest_ip %s ,if_name %s\n",my_ntoa(ntohl(ip)),if_name.c_str());
+		return -1;
+	}
+	//printf("%s\n",hw.c_str());
+
+	dest_ip=ntohl(dest_ip);
 	return 0;
 }
 
@@ -316,19 +561,18 @@ int send_raw_ip(raw_info_t &raw_info,const char * payload,int payloadlen)
 	struct iphdr *iph = (struct iphdr *) send_raw_ip_buf;
     memset(iph,0,sizeof(iphdr));
 
-    static unsigned short ip_id=1;
-
     iph->ihl = sizeof(iphdr)/4;  //we dont use ip options,so the length is just sizeof(iphdr)
     iph->version = 4;
     iph->tos = 0;
 
     if(lower_level)
     {
-    	iph->id=0;
-    	//iph->id = htons (ip_id++); //Id of this packet
+    	//iph->id=0;
+    	iph->id = htons (g_ip_id_counter++); //Id of this packet
     }
     else
-    	iph->id = 0; //Id of this packet  ,kernel will auto fill this if id is zero  ,or really?????// todo //seems like there is a problem
+    	iph->id = htons (g_ip_id_counter++); //Id of this packet
+    	//iph->id = 0; //Id of this packet  ,kernel will auto fill this if id is zero  ,or really?????// todo //seems like there is a problem
 
     iph->frag_off = htons(0x4000); //DF set,others are zero
    // iph->frag_off = htons(0x0000); //DF set,others are zero
@@ -353,7 +597,7 @@ int send_raw_ip(raw_info_t &raw_info,const char * payload,int payloadlen)
     int ret;
     if(lower_level==0)
     {
-		struct sockaddr_in sin;
+		struct sockaddr_in sin={0};
 		sin.sin_family = AF_INET;
 		//sin.sin_port = htons(info.dst_port); //dont need this
 		sin.sin_addr.s_addr = send_info.dst_ip;
@@ -363,14 +607,9 @@ int send_raw_ip(raw_info_t &raw_info,const char * payload,int payloadlen)
     else
     {
 
-    	struct sockaddr_ll addr;
-    	memset(&addr,0,sizeof(addr));
+    	struct sockaddr_ll addr={0};  //={0} not necessary
+    	memcpy(&addr,&send_info.addr_ll,sizeof(addr));
 
-    	addr.sll_family=AF_PACKET;
-    	addr.sll_ifindex=ifindex;
-    	addr.sll_halen=ETHER_ADDR_LEN;
-    	addr.sll_protocol=htons(ETH_P_IP);
-    	memcpy(addr.sll_addr,oppsite_hw_addr,ETHER_ADDR_LEN);
     	ret = sendto(raw_send_fd, send_raw_ip_buf, ip_tot_len ,  0, (struct sockaddr *) &addr, sizeof (addr));
     }
     if(ret==-1)
@@ -389,13 +628,15 @@ int send_raw_ip(raw_info_t &raw_info,const char * payload,int payloadlen)
 int peek_raw(packet_info_t &peek_info)
 {	static char peek_raw_buf[buf_len];
 	char *ip_begin=peek_raw_buf+link_level_header_len;
-	struct sockaddr saddr;
-	socklen_t saddr_size;
-	int recv_len = recvfrom(raw_recv_fd, peek_raw_buf,buf_len, MSG_PEEK ,&saddr , &saddr_size);//change buf_len to something smaller,we only need header here
+	struct sockaddr saddr={0};
+	socklen_t saddr_size=sizeof(saddr);
+	int recv_len = recvfrom(raw_recv_fd, peek_raw_buf,max_data_len, MSG_PEEK ,&saddr , &saddr_size);//change max_data_len to something smaller,we only need header here
 	iphdr * iph = (struct iphdr *) (ip_begin);
 	//mylog(log_info,"recv_len %d\n",recv_len);
 	if(recv_len<int(sizeof(iphdr)))
 	{
+		mylog(log_trace,"failed here %d %d\n",recv_len,int(sizeof(iphdr)));
+		mylog(log_trace,"%s\n ",strerror(errno));
 		return -1;
 	}
 	peek_info.src_ip=iph->saddr;
@@ -407,10 +648,17 @@ int peek_raw(packet_info_t &peek_info)
     {
     	case mode_faketcp:
     	{
-    		if(iph->protocol!=IPPROTO_TCP) return -1;
+    		if(iph->protocol!=IPPROTO_TCP)
+    		{
+    			mylog(log_trace,"failed here");
+    			return -1;
+    		}
     		struct tcphdr *tcph=(tcphdr *)payload;
     		if(recv_len<int( iphdrlen+sizeof(tcphdr) ))
+    		{
+    			mylog(log_trace,"failed here");
     			return -1;
+    		}
     		peek_info.src_port=ntohs(tcph->source);
     		peek_info.syn=tcph->syn;
 			break;
@@ -445,12 +693,10 @@ int recv_raw_ip(raw_info_t &raw_info,char * &payload,int &payloadlen)
 	static char recv_raw_ip_buf[buf_len];
 
 	iphdr *  iph;
-	struct sockaddr saddr;
-	socklen_t saddr_size;
-	saddr_size = sizeof(saddr);
+	struct sockaddr_ll saddr={0};
+	socklen_t saddr_size = sizeof(saddr);
 	int flag=0;
-
-	int recv_len = recvfrom(raw_recv_fd, recv_raw_ip_buf, buf_len, flag ,&saddr , &saddr_size);
+	int recv_len = recvfrom(raw_recv_fd, recv_raw_ip_buf, max_data_len, flag ,(sockaddr*)&saddr , &saddr_size);
 
 	if(recv_len<0)
 	{
@@ -477,10 +723,15 @@ int recv_raw_ip(raw_info_t &raw_info,char * &payload,int &payloadlen)
 	recv_info.dst_ip=iph->daddr;
 	recv_info.protocol=iph->protocol;
 
+	if(lower_level)
+	{
+		memcpy(&recv_info.addr_ll,&saddr,sizeof(recv_info.addr_ll));
+	}
 
 
 	if(bind_address_uint32!=0 &&recv_info.dst_ip!=bind_address_uint32)
 	{
+		mylog(log_trace,"bind adress doenst match, dropped\n");
 		//printf(" bind adress doenst match, dropped\n");
 		return -1;
 	}
@@ -615,8 +866,8 @@ int send_raw_tcp(raw_info_t &raw_info,const char * payload, int payloadlen) {  	
 
 	//mylog(log_debug,"syn %d\n",send_info.syn);
 
-	char send_raw_tcp_buf0[buf_len];
-	char *send_raw_tcp_buf=send_raw_tcp_buf0;
+	char send_raw_tcp_buf[buf_len];
+	//char *send_raw_tcp_buf=send_raw_tcp_buf0;
 
 	struct tcphdr *tcph = (struct tcphdr *) (send_raw_tcp_buf
 			+ sizeof(struct pseudo_header));
@@ -655,14 +906,20 @@ int send_raw_tcp(raw_info_t &raw_info,const char * payload, int payloadlen) {  	
 		send_raw_tcp_buf[i++] = 0x08;   //ts   i=6
 		send_raw_tcp_buf[i++] = 0x0a;   //i=7
 
-		*(u32_t*) (&send_raw_tcp_buf[i]) = htonl(
-				(u32_t) get_current_time());
+		//*(u32_t*) (&send_raw_tcp_buf[i]) = htonl(
+			//	(u32_t) get_current_time());
+
+		u32_t ts=htonl((u32_t) get_current_time());
+		memcpy(&send_raw_tcp_buf[i],&ts,sizeof(ts));
 
 		i += 4;
 
 		//mylog(log_info,"[syn]<send_info.ts_ack= %u>\n",send_info.ts_ack);
 
-		*(u32_t*) (&send_raw_tcp_buf[i]) = htonl(send_info.ts_ack);
+		//*(u32_t*) (&send_raw_tcp_buf[i]) = htonl(send_info.ts_ack);
+		u32_t ts_ack=htonl(send_info.ts_ack);
+		memcpy(&send_raw_tcp_buf[i],&ts_ack,sizeof(ts_ack));
+
 		i += 4;
 
 		send_raw_tcp_buf[i++] = 0x01;
@@ -679,14 +936,19 @@ int send_raw_tcp(raw_info_t &raw_info,const char * payload, int payloadlen) {  	
 		send_raw_tcp_buf[i++] = 0x08;  //ts   //i=2
 		send_raw_tcp_buf[i++] = 0x0a; 		  //i=3;
 
-		*(u32_t*) (&send_raw_tcp_buf[i]) = htonl(
-				(u32_t) get_current_time());
+		//*(u32_t*) (&send_raw_tcp_buf[i]) = htonl(
+			//	(u32_t) get_current_time());
+
+		u32_t ts=htonl((u32_t) get_current_time());
+		memcpy(&send_raw_tcp_buf[i],&ts,sizeof(ts));
 
 		i += 4;
 
 		//mylog(log_info,"<send_info.ts_ack= %u>\n",send_info.ts_ack);
 
-		*(u32_t*) (&send_raw_tcp_buf[i]) = htonl(send_info.ts_ack);
+		//*(u32_t*) (&send_raw_tcp_buf[i]) = htonl(send_info.ts_ack);
+		u32_t ts_ack=htonl(send_info.ts_ack);
+		memcpy(&send_raw_tcp_buf[i],&ts_ack,sizeof(ts_ack));
 		i += 4;
 	}
 
@@ -987,7 +1249,7 @@ int recv_raw_udp(raw_info_t &raw_info, char *&payload, int &payloadlen)
 	}
 	udphdr *udph=(struct udphdr*)ip_payload;
 
-	if(ntohs(udph->len)!=ip_payloadlen)
+	if(int(ntohs(udph->len))!=ip_payloadlen)
 	{
 
 		mylog(log_debug,"udp length error %d %d \n",ntohs(udph->len),ip_payloadlen);
@@ -1105,8 +1367,14 @@ int recv_raw_tcp(raw_info_t &raw_info,char * &payload,int &payloadlen)
     	if(tcp_option[6]==0x08 &&tcp_option[7]==0x0a)
     	{
     		recv_info.has_ts=1;
-    		recv_info.ts=ntohl(*(u32_t*)(&tcp_option[8]));
-    		recv_info.ts_ack=ntohl(*(u32_t*)(&tcp_option[12]));
+    		//recv_info.ts=ntohl(*(u32_t*)(&tcp_option[8]));
+    		memcpy(&recv_info.ts,&tcp_option[8],sizeof(recv_info.ts));
+    		recv_info.ts=ntohl(recv_info.ts);
+
+    		//recv_info.ts_ack=ntohl(*(u32_t*)(&tcp_option[12]));
+    		memcpy(&recv_info.ts_ack,&tcp_option[12],sizeof(recv_info.ts_ack));
+    		recv_info.ts_ack=ntohl(recv_info.ts_ack);
+
     		//g_packet_info_send.ts_ack= ntohl(*(uint32_t*)(&tcp_option[8]));
     	}
     	else
@@ -1119,8 +1387,12 @@ int recv_raw_tcp(raw_info_t &raw_info,char * &payload,int &payloadlen)
     	if(tcp_option[2]==0x08 &&tcp_option[3]==0x0a)
     	{
     		recv_info.has_ts=1;
-    		recv_info.ts=ntohl(*(u32_t*)(&tcp_option[4]));
-    		recv_info.ts_ack=ntohl(*(u32_t*)(&tcp_option[8]));
+    		//recv_info.ts=ntohl(*(u32_t*)(&tcp_option[4]));
+    		memcpy(&recv_info.ts,&tcp_option[4],sizeof(recv_info.ts));
+    		recv_info.ts=ntohl(recv_info.ts);
+    		//recv_info.ts_ack=ntohl(*(u32_t*)(&tcp_option[8]));
+    		memcpy(&recv_info.ts_ack,&tcp_option[8],sizeof(recv_info.ts_ack));
+    		recv_info.ts_ack=ntohl(recv_info.ts_ack);
     		//g_packet_info_send.ts_ack= ntohl(*(uint32_t*)(&tcp_option[0]));
     	}
     	else
@@ -1183,7 +1455,7 @@ int recv_raw_tcp_deprecated(packet_info_t &info,char * &payload,int &payloadlen)
 
 	mylog(log_trace,"raw!\n");
 
-	size = recvfrom(raw_recv_fd, buf, buf_len, 0 ,&saddr , &saddr_size);
+	size = recvfrom(raw_recv_fd, buf, max_data_len, 0 ,&saddr , &saddr_size);
 
 	if(buf[12]!=8||buf[13]!=0)
 	{

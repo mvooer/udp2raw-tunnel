@@ -11,12 +11,31 @@
 //static uint64_t seq=1;
 
 static int8_t zero_iv[]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,   0,0,0,0};//this prog use zero iv,you should make sure first block of data contains a random/nonce data
+/****
+ * security of zero_iv + nonce first data block
+ * https://crypto.stackexchange.com/questions/5421/using-cbc-with-a-fixed-iv-and-a-random-first-plaintext-block
+****/
 
+
+/*
+TODO
+
+Change md5 to HMAC-md5 if necessary.Change padding to PKCS#7 style if necessary.
+
+Need someone with cryptography knowledge to help review the encryption method.
+
+Change them if necessary(I can do this by myself,if it turns out to be necessary).
+
+github issue:
+
+https://github.com/wangyu-/udp2raw-tunnel/issues/17
+
+*/
 
 unordered_map<int, const char *> auth_mode_tostring = {{auth_none, "none"}, {auth_md5, "md5"}, {auth_crc32, "crc32"},{auth_simple,"simple"}};
 unordered_map<int, const char *> cipher_mode_tostring={{cipher_none,"none"},{cipher_aes128cbc,"aes128cbc"},{cipher_xor,"xor"}};
 
-auth_mode_t auth_mode=auth_crc32;
+auth_mode_t auth_mode=auth_md5;
 cipher_mode_t cipher_mode=cipher_aes128cbc;
 
 
@@ -213,7 +232,7 @@ int auth_crc32_verify(const char *data,int &len)
 {
 	if(len<int(sizeof(unsigned int)))
 	{
-		mylog(log_debug,"auth_crc32_verify len<16\n");
+		mylog(log_debug,"auth_crc32_verify len<%d\n",int(sizeof(unsigned int)));
 		return -1;
 	}
 	unsigned int  ret=crc32h((unsigned char *)data,len-sizeof(unsigned int));
@@ -313,6 +332,7 @@ int my_encrypt(const char *data,char *output,int &len,char * key)
 	return 0;
 
 }
+
 int my_decrypt(const char *data,char *output,int &len,char * key)
 {
 	if(len<0) return -1;
@@ -320,99 +340,6 @@ int my_decrypt(const char *data,char *output,int &len,char * key)
 
 	if(cipher_decrypt(data,output,len,key) !=0) {mylog(log_debug,"cipher_decrypt failed \n"); return -1;}
 	if(auth_verify(output,len)!=0) {mylog(log_debug,"auth_verify failed\n");return -1;}
-
-	return 0;
-}
-
-int my_encrypt_old(const char *data0,char *output,int &len,char * key)
-{
-	static const int disable_all=0;
-	static const int disable_aes=0;
-
-	char data[buf_len];
-	memcpy(data,data0,len);
-
-	if(disable_all)
-	{
-		memcpy(output,data,len);
-		return 0;
-	}
-
-	int ori_len=len;
-
-	len=len+16;//md5
-	len+=2;//length
-
-	if(len%16!=0)
-	{
-		len= (len/16)*16+16;
-	}
-
-	if(len>max_data_len) return -1;
-
-	data[len-16-2]= (unsigned char)( (uint16_t(ori_len))>>8);
-	data[len-16-1]=(unsigned char)( ((uint16_t(ori_len))<<8)>>8) ;
-
-
-	//printf("%d %d\n",data[len-16-2],data[len-16-1]);
-	md5((unsigned char *)data,len-16,(unsigned char *)(data+len-16));
-
-
-	if(disable_aes)
-	{
-		memcpy(output,data,len);
-
-	}
-	else
-	{
-		AES_CBC_encrypt_buffer((unsigned char *)output,(unsigned char *)data,len,(unsigned char *)key,(unsigned char *)zero_iv);
-		//it doesnt allow over lap
-	}
-
-
-	return 0;
-}
-int my_decrypt_old(const char *data0,char *output,int &len,char * key)
-{
-	static const int disable_all=0;
-	static const int disable_aes=0;
-
-	char data[buf_len];
-	memcpy(data,data0,len);
-
-	if(disable_all)
-	{
-		memcpy(output,data,len);
-		return 0;
-	}
-	uint8_t md5_res[16];
-	if(len>max_data_len) return -1;
-	if(len<32) return -1;
-	if(len%16 !=0) return -1;
-
-
-	if(disable_aes)
-	{
-		memcpy(output,data,len);
-	}
-	else
-	{
-		AES_CBC_decrypt_buffer((unsigned char *)output,(unsigned char *)data,len,(unsigned char *)key,(unsigned char *)zero_iv);
-	}
-
-
-	//printf("%d %d\n",data[len-16-2],data[len-16-1]);
-
-	//printf("<<%d>>",len);
-
-	md5((unsigned char *)output,len-16,(unsigned char *)md5_res);
-
-	if(memcmp(output+len-16,md5_res,16)!=0)
-	{
-		return -2;
-	}
-
-	len=((unsigned char)output[len-16-2])*256u+((unsigned char)output[len-16-1]);  //this may be broken because of sign
 
 	return 0;
 }

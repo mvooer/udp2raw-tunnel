@@ -2,6 +2,7 @@
 ![image_vpn](/images/openvpn.PNG)
 
 ![image4](/images/image4.PNG)
+
 # udp2raw command
 #### run at server side
 ```
@@ -13,6 +14,8 @@ assume server ip is 45.66.77.88
 ./udp2raw_amd64 -s -l0.0.0.0:3333 -r 45.66.77.88:8855 -k "passwd" --raw-mode faketcp -a
 ```
 
+#### hint
+You can add `--cipher-mode xor` `--auth-mode simple` to **both** sides to obtain maximum performance(but poor security).
 
 # openvpn config
 
@@ -38,7 +41,7 @@ mute 20
 
 comp-lzo no
 cipher none      ##### disable openvpn 's cipher and auth for maxmized peformance. 
-auth none        ##### you can enable openvpn's cipher and auth,if you dont care about peformance,oryou dont trust udp2raw 's encryption
+auth none        ##### you can enable openvpn's cipher and auth,if you dont care about peformance,or you dont trust udp2raw 's encryption
 
 fragment 1200       ##### very important    you can turn it up a bit. but,the lower the safer
 mssfix 1200         ##### very important
@@ -80,7 +83,7 @@ mute 20
 
 comp-lzo no
 cipher none      ##### disable openvpn 's cipher and auth for maxmized peformance. 
-auth none        ##### you can enable openvpn's cipher and auth,if you dont care about peformance,oryou dont trust udp2raw 's encryption
+auth none        ##### you can enable openvpn's cipher and auth,if you dont care about peformance,or you dont trust udp2raw 's encryption
 
 fragment 1200       ##### very important    you can turn it up a bit. but,the lower the safer
 mssfix 1200         ##### very important

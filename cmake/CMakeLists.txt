@@ -13,7 +13,7 @@ set(SOURCE_FILES
         main.cpp
         network.cpp
         )
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-variable -Wno-unused-parameter -static")
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-variable -Wno-unused-parameter -Wno-missing-field-initializers  -static")
 #set(CMAKE_LINK_LIBRARY_FLAG "-lrt")
-add_executable(udp2raw_tunnel ${SOURCE_FILES})
-target_link_libraries(udp2raw_tunnel rt)
+add_executable(udp2raw_cmake ${SOURCE_FILES})
+target_link_libraries(udp2raw_cmake rt)

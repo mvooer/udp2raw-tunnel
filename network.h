@@ -5,8 +5,8 @@
  *      Author: wangyu
  */
 
-#ifndef NETWORK_H_
-#define NETWORK_H_
+#ifndef UDP2RAW_NETWORK_H_
+#define UDP2RAW_NETWORK_H_
 
 extern int raw_recv_fd;
 extern int raw_send_fd;
@@ -16,8 +16,11 @@ extern u32_t bind_address_uint32;
 extern int disable_bpf_filter;
 
 extern int lower_level;
+extern int lower_level_manual;
 extern char if_name[100];
-extern unsigned char oppsite_hw_addr[];
+extern unsigned char dest_hw_addr[];
+
+extern int ifindex;
 
 struct icmphdr
 {
@@ -58,6 +61,9 @@ struct packet_info_t  //todo change this to union
 	uint16_t icmp_seq;
 
 	bool has_ts;
+
+	sockaddr_ll addr_ll;
+
 	packet_info_t();
 };
 
@@ -80,8 +86,9 @@ int init_raw_socket();
 void init_filter(int port);
 
 void remove_filter();
-int init_ifindex(char * if_name);
+int init_ifindex(const char * if_name,int &index);
 
+int find_lower_level_info(u32_t ip,u32_t &dest_ip,string &if_name,string &hw);
 
 int send_raw_ip(raw_info_t &raw_info,const char * payload,int payloadlen);
 
