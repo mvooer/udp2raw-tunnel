@@ -6,20 +6,6 @@ A Tunnel which turns UDP Traffic into Encrypted FakeTCP/UDP/ICMP Traffic by usin
 It can tunnel any traffic when used together with a UDP-based VPN(such as OpenVPN).Check [this link](https://github.com/wangyu-/udp2raw-tunnel#tunneling-any-traffic-via-raw-traffic-by-using-udp2raw-openvpn) for more info.
 
 [简体中文](/doc/README.zh-cn.md)
-# Frequently Asked Questions
-### Q: What is the advantage of using udp2raw FakeTCP mode,why not use a TCP-based VPN(such as OpenVPN TCP mode)?
-Answer: **TCP doesnt allow real-time/out-of-order delivery**. **If you use OpenVPN TCP mode to turn UDP traffic into TCP,there will be latency issue**:the loss of a single packet blocks all following packet until re-transmission is done. This will cause unacceptable delay for gaming and voice chatting.
-
-**TCP also has re-transmission and congestion control which cant be disabled.** UDP programs usualy want to control packet sending rate by themselves. If you use OpenVPN TCP mode this cant be done because of the congestion control of underlying TCP protocol. Further more,with the re-transmission of underlying TCP,**if you send too many udp packets via an OpenVPN TCP connection,the connection will become completely unusable for a while**(It will eventually recover as most of the re-transmission is done,but it wont be very soon).
-
-Those issues exist for almost all TCP-based VPNs.
-
-For udp2raw there is no underlying TCP protocol,udp2raw just add TCP headers to UDP packets directly by using raw socket. It supports real-time/out-of-order delivery,there is no re-transmission and congestion control. **Udp2raw doesnt have all above issues**.
-
-### Q: Is udp2raw designed for replacing VPN?
-Answer: No. Udp2raw is designed for bypassing UDP restrictions. It doesnt have all of the features a VPN has(such as transparently redirect all traffic).
-
-Instead of replacing VPN,udp2raw can be used with any UDP-based VPN together to grant UDP-based VPN the ablity of bypassing UDP restrictions,while not having the performance issue involved by a TCP-based VPN. Check [this link](https://github.com/wangyu-/udp2raw-tunnel#tunneling-any-traffic-via-raw-traffic-by-using-udp2raw-openvpn) for more info.
 
 # Support Platforms
 Linux host (including desktop Linux,Android phone/tablet,OpenWRT router,or Raspberry PI) with root access.
@@ -60,6 +46,22 @@ For example, if you use udp2raw + OpenVPN, OpenVPN won't lose connection after a
 ### Keywords
 `Bypass UDP QoS` `Bypass UDP Blocking` `Bypass OpenVPN TCP over TCP problem` `OpenVPN over ICMP` `UDP to ICMP tunnel` `UDP to TCP tunnel` `UDP over ICMP` `UDP over TCP`
 
+# Frequently Asked Questions
+### Q: What is the advantage of using udp2raw FakeTCP mode,why not use a TCP-based VPN(such as OpenVPN TCP mode)?
+Answer: **TCP doesnt allow real-time/out-of-order delivery**. **If you use OpenVPN TCP mode to turn UDP traffic into TCP,there will be latency issue**:the loss of a single packet blocks all following packet until re-transmission is done. This will cause unacceptable delay for gaming and voice chatting.
+
+**TCP also has re-transmission and congestion control which cant be disabled.** UDP programs usualy want to control packet sending rate by themselves. If you use OpenVPN TCP mode this cant be done because of the congestion control of underlying TCP protocol. Further more,with the re-transmission of underlying TCP,**if you send too many udp packets via an OpenVPN TCP connection,the connection will become completely unusable for a while**(It will eventually recover as most of the re-transmission is done,but it wont be very soon).
+
+Those issues exist for almost all TCP-based VPNs.
+
+For udp2raw there is no underlying TCP protocol,udp2raw just add TCP headers to UDP packets directly by using raw socket. It supports real-time/out-of-order delivery,there is no re-transmission and congestion control. **Udp2raw doesnt have all above issues**.
+
+### Q: Is udp2raw designed for replacing VPN?
+Answer: No. Udp2raw is designed for bypassing UDP restrictions. It doesnt have all of the features a VPN has(such as transparently redirect all traffic).
+
+Instead of replacing VPN,udp2raw can be used with any UDP-based VPN together to grant UDP-based VPN the ablity of bypassing UDP restrictions,while not having the performance issue involved by a TCP-based VPN. Check [this link](https://github.com/wangyu-/udp2raw-tunnel#tunneling-any-traffic-via-raw-traffic-by-using-udp2raw-openvpn) for more info.
+
+
 # Getting Started
 ### Installing
 Download binary release from https://github.com/wangyu-/udp2raw-tunnel/releases
@@ -84,11 +86,15 @@ Now,an encrypted raw tunnel has been established between client and server throu
 ### Note
 To run on Android, check [Android_Guide](/doc/android_guide.md)
 
+If you have connection problems.Take a look at `--seq-mode` option.
+
+You can run udp2raw with a non-root account(for better security).Take a look at [#26](https://github.com/wangyu-/udp2raw-tunnel/issues/26) for more info. 
+
 # Advanced Topic
 ### Usage
 ```
 udp2raw-tunnel
-version: Aug 26 2017 08:30:48
+git version:adbe7d110f    build date:Sep  6 2017 05:37:45
 repository: https://github.com/wangyu-/udp2raw-tunnel
 
 usage:
@@ -118,10 +124,14 @@ other options:
     --disable-bpf                         disable the kernel space filter,most time its not necessary
                                           unless you suspect there is a bug
     --sock-buf            <number>        buf size for socket,>=10 and <=10240,unit:kbyte,default:1024
-    --seqmode             <number>        seq increase mode for faketcp:
-                                          0:dont increase
-                                          1:increase every packet(default)
-                                          2:increase randomly, about every 3 packets
+    --force-sock-buf                      bypass system limitation while setting sock-buf
+    --seq-mode            <number>        seq increase mode for faketcp:
+                                          0:static header,do not increase seq and ack_seq
+                                          1:increase seq for every packet,simply ack last seq
+                                          2:increase seq randomly, about every 3 packets,simply ack last seq
+                                          3:simulate an almost real seq/ack procedure(default)
+                                          4:similiar to 3,but do not consider TCP Option Window_Scale,
+                                          maybe useful when firewall doesnt support TCP Option 
     --lower-level         <string>        send packets at OSI level 2, format:'if_name#dest_mac_adress'
                                           ie:'eth0#00:23:45:67:89:b9'.or try '--lower-level auto' to obtain
                                           the parameter automatically,specify it manually if 'auto' failed

@@ -11,6 +11,7 @@
 extern int raw_recv_fd;
 extern int raw_send_fd;
 extern int seq_mode;
+extern int max_seq_mode;
 extern int filter_port;
 extern u32_t bind_address_uint32;
 extern int disable_bpf_filter;
@@ -54,6 +55,7 @@ struct packet_info_t  //todo change this to union
 
 	u32_t seq,ack_seq;
 
+	u32_t ack_seq_counter;
 
 	u32_t ts,ts_ack;
 
@@ -64,6 +66,8 @@ struct packet_info_t  //todo change this to union
 
 	sockaddr_ll addr_ll;
 
+	i32_t data_len;
+
 	packet_info_t();
 };
 
@@ -72,10 +76,10 @@ struct raw_info_t
 	packet_info_t send_info;
 	packet_info_t recv_info;
 
-	int last_send_len;
-	int last_recv_len;
+	//int last_send_len;
+	//int last_recv_len;
 
-	u32_t reserved_seq;
+	u32_t reserved_send_seq;
 	//uint32_t first_seq,first_ack_seq;
 
 };//g_raw_info;

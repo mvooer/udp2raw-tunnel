@@ -3,6 +3,7 @@
 #include "log.h"
 #include "lib/md5.h"
 #include "encrypt.h"
+#include "git_version.h"
 #include <fstream>
 #include <string>
 #include <vector>
@@ -649,7 +650,7 @@ int send_bare(raw_info_t &raw_info,const char* data,int len)//send function with
 	send_raw0(raw_info,send_data_buf2,new_len);
 	return 0;
 }
-int parse_bare(const char *input,int input_len,char* & data,int & len) // a sub function used in recv_bare
+int reserved_parse_bare(const char *input,int input_len,char* & data,int & len) // a sub function used in recv_bare
 {
 	static char recv_data_buf[buf_len];
 
@@ -694,7 +695,7 @@ int recv_bare(raw_info_t &raw_info,char* & data,int & len)//recv function with e
 		mylog(log_debug,"unexpect packet type recv_info.syn=%d recv_info.ack=%d \n",recv_info.syn,recv_info.ack);
 		return -1;
 	}
-	return parse_bare(data,len,data,len);
+	return reserved_parse_bare(data,len,data,len);
 }
 
 int send_handshake(raw_info_t &raw_info,id_t id1,id_t id2,id_t id3)// a warp for send_bare for sending handshake(this is not tcp handshake) easily
@@ -1121,9 +1122,9 @@ int client_on_timer(conn_info_t &conn_info) //for client. called when a timer is
 					send_info.seq++;
 					send_info.ack_seq=recv_info.seq+1;
 					send_info.ts_ack=recv_info.ts;
-					raw_info.reserved_seq=send_info.seq;
+					raw_info.reserved_send_seq=send_info.seq;
 				}
-				send_info.seq=raw_info.reserved_seq;
+				send_info.seq=raw_info.reserved_send_seq;
 				send_info.psh = 0;
 				send_info.syn = 0;
 				send_info.ack = 1;
@@ -1131,7 +1132,7 @@ int client_on_timer(conn_info_t &conn_info) //for client. called when a timer is
 
 				send_handshake(raw_info,conn_info.my_id,0,const_id);
 
-				send_info.seq+=raw_info.last_send_len;
+				send_info.seq+=raw_info.send_info.data_len;
 			}
 			else
 			{
@@ -1165,13 +1166,13 @@ int client_on_timer(conn_info_t &conn_info) //for client. called when a timer is
 			{
 				if(conn_info.last_hb_sent_time==0)
 				{
-					send_info.ack_seq=recv_info.seq+raw_info.last_recv_len;
+					send_info.ack_seq=recv_info.seq+raw_info.recv_info.data_len;
 					send_info.ts_ack=recv_info.ts;
-					raw_info.reserved_seq=send_info.seq;
+					raw_info.reserved_send_seq=send_info.seq;
 				}
-				send_info.seq=raw_info.reserved_seq;
+				send_info.seq=raw_info.reserved_send_seq;
 				send_handshake(raw_info,conn_info.my_id,conn_info.oppsite_id,const_id);
-				send_info.seq+=raw_info.last_send_len;
+				send_info.seq+=raw_info.send_info.data_len;
 
 			}
 			else
@@ -1561,6 +1562,10 @@ int server_on_raw_recv_multi() //called when server received an raw packet
 				return 0;
 			}
 		}
+		else
+		{
+			recv(raw_recv_fd, 0,0,0);
+		}
 		return 0;
 	}
 	if(!conn_manager.exist(ip,port))
@@ -1647,7 +1652,7 @@ int server_on_raw_recv_multi() //called when server received an raw packet
 		{
 			return -1;
 		}
-		server_on_raw_recv_handshake1(conn_info,ip_port,data,data_len);
+		return server_on_raw_recv_handshake1(conn_info,ip_port,data,data_len);
 	}
 	if(conn_info.state.server_current_state==server_ready)
 	{
@@ -1659,7 +1664,15 @@ int server_on_raw_recv_multi() //called when server received an raw packet
 		//mylog(log_info,"after recv_safer\n");
 		return server_on_raw_recv_ready(conn_info,ip_port,type,data,data_len);
 	}
-	return 0;
+
+	if(conn_info.state.server_current_state==server_idle)
+	{
+		recv(raw_recv_fd, 0,0, 0  );//
+		return 0;
+	}
+	mylog(log_fatal,"we should never run to here\n");
+	myexit(-1);
+	return -1;
 }
 
 /*
@@ -1705,7 +1718,7 @@ int server_on_raw_recv_handshake1(conn_info_t &conn_info,char * ip_port,char * d
 		if(raw_mode==mode_faketcp)
 		{
 			send_info.seq=recv_info.ack_seq;
-			send_info.ack_seq=recv_info.seq+raw_info.last_recv_len;
+			send_info.ack_seq=recv_info.seq+raw_info.recv_info.data_len;
 			send_info.ts_ack=recv_info.ts;
 		}
 		if(raw_mode==mode_icmp)
@@ -1729,7 +1742,7 @@ int server_on_raw_recv_handshake1(conn_info_t &conn_info,char * ip_port,char * d
 		if(raw_mode==mode_faketcp)
 		{
 			send_info.seq=recv_info.ack_seq;
-			send_info.ack_seq=recv_info.seq+raw_info.last_recv_len;
+			send_info.ack_seq=recv_info.seq+raw_info.recv_info.data_len;
 			send_info.ts_ack=recv_info.ts;
 		}
 
@@ -2579,8 +2592,12 @@ int process_lower_level_arg()//handle --lower-level option
 }
 void print_help()
 {
+	char git_version_buf[100]={0};
+	strncpy(git_version_buf,gitversion,10);
 	printf("udp2raw-tunnel\n");
-	printf("version: %s %s\n",__DATE__,__TIME__);
+	printf("git version:%s    ",git_version_buf);
+	printf("build date:%s %s\n",__DATE__,__TIME__);
+
 	printf("repository: https://github.com/wangyu-/udp2raw-tunnel\n");
 	printf("\n");
 	printf("usage:\n");
@@ -2616,10 +2633,13 @@ void print_help()
 //	printf("\n");
 	printf("    --sock-buf            <number>        buf size for socket,>=10 and <=10240,unit:kbyte,default:1024\n");
 	printf("    --force-sock-buf                      bypass system limitation while setting sock-buf\n");
-	printf("    --seqmode             <number>        seq increase mode for faketcp:\n");
-	printf("                                          0:dont increase\n");
-	printf("                                          1:increase every packet(default)\n");
-	printf("                                          2:increase randomly, about every 3 packets\n");
+	printf("    --seq-mode            <number>        seq increase mode for faketcp:\n");
+	printf("                                          0:static header,do not increase seq and ack_seq\n");
+	printf("                                          1:increase seq for every packet,simply ack last seq\n");
+	printf("                                          2:increase seq randomly, about every 3 packets,simply ack last seq\n");
+	printf("                                          3:simulate an almost real seq/ack procedure(default)\n");
+	printf("                                          4:similiar to 3,but do not consider TCP Option Window_Scale,\n");
+	printf("                                          maybe useful when firewall doesnt support TCP Option \n");
 //	printf("\n");
 	printf("    --lower-level         <string>        send packets at OSI level 2, format:'if_name#dest_mac_adress'\n");
 	printf("                                          ie:'eth0#00:23:45:67:89:b9'.or try '--lower-level auto' to obtain\n");
@@ -3063,7 +3083,7 @@ void process_arg(int argc, char *argv[])  //process all options
 			else if(strcmp(long_options[option_index].name,"seq-mode")==0)
 			{
 				sscanf(optarg,"%d",&seq_mode);
-				if(0<=seq_mode&&seq_mode<=2)
+				if(0<=seq_mode&&seq_mode<=max_seq_mode)
 				{
 				}
 				else
@@ -3329,7 +3349,7 @@ void iptables_rule()  // handles -a -g --gen-add  --keep-rule
 	}
 	if(generate_iptables_rule)
 	{
-		string rule="iptables -I ";
+		string rule="iptables -I INPUT ";
 		rule+=pattern;
 		rule+=" -j DROP";
 
