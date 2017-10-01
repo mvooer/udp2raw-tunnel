@@ -8,8 +8,10 @@ cc_arm= /toolchains/arm-2014.05/bin/arm-none-linux-gnueabi-g++
 #cc_bcm2708=/home/wangyu/raspberry/tools/arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian/bin/arm-linux-gnueabihf-g++ 
 FLAGS= -std=c++11 -Wall -Wextra -Wno-unused-variable -Wno-unused-parameter -Wno-missing-field-initializers
 
-SOURCES=main.cpp lib/aes.c lib/md5.c encrypt.cpp log.cpp network.cpp common.cpp  -lpthread
-SOURCES_AES_ACC=$(filter-out lib/aes.c,$(SOURCES)) $(wildcard lib/aes_acc/aes*.c)
+COMMON=main.cpp lib/md5.c encrypt.cpp log.cpp network.cpp common.cpp  connection.cpp misc.cpp -lpthread
+SOURCES= $(COMMON) lib/aes_faster_c/aes.c lib/aes_faster_c/wrapper.c
+SOURCES_TINY_AES= $(COMMON) lib/aes.c
+SOURCES_AES_ACC=$(COMMON) $(wildcard lib/aes_acc/aes*.c)
 
 NAME=udp2raw
 TARGETS=amd64 arm amd64_hw_aes arm_asm_aes mips24kc_be mips24kc_be_asm_aes x86 x86_asm_aes mips24kc_le mips24kc_le_asm_aes
@@ -27,6 +29,9 @@ debug: git_version
 debug2: git_version
 	rm -f ${NAME}
 	${cc_local}   -o ${NAME}          -I. ${SOURCES} ${FLAGS} -lrt -Wformat-nonliteral -ggdb
+
+dynamic: git_version
+	${cc_local}   -o ${NAME}_$@          -I. ${SOURCES} ${FLAGS} -lrt -O3
 
 mips24kc_be: git_version
 	${cc_mips24kc_be}  -o ${NAME}_$@   -I. ${SOURCES} ${FLAGS} -lrt -lgcc_eh -static -O3
@@ -68,7 +73,7 @@ release: ${TARGETS}
 
 clean:	
 	rm -f ${TAR}
-	rm -f udp2raw udp2raw_cross udp2raw_cmake
+	rm -f udp2raw udp2raw_cross udp2raw_cmake udp2raw_dynamic
 	rm -f git_version.h
 
 git_version:
